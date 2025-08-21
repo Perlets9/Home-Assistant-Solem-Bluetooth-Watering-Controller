@@ -131,8 +131,25 @@ class SolemCoordinator(DataUpdateCoordinator):
         self.storage = Store(hass, 1, f"irrigation_{config_entry.unique_id}")
         self.irrigation_stop_event = asyncio.Event()
         
-        # Initialize schedule to prevent AttributeError during early calls
+        # Initialize attributes to prevent AttributeError during early calls
         self.schedule = None
+        self.will_it_rain_today = False
+        self.will_it_rain_today_forecast = []
+        self.has_rained_today = False
+        self.is_raining_now = False
+        self.is_raining_now_json = {}
+        self.irrigation_manual_duration = 10
+        self.rain_time_today = 0
+        self.rain_total_amount_today = 0
+        self.rain_total_amount_forecasted_today = 0
+        self.total_water_consumption = 0
+        self.sprinkle_total_amount_today = [0.0] * self.num_stations
+        self.sprinkle_target_amount_today = [0.0] * self.num_stations
+        self.forecasted_sprinkle_today = [0.0] * self.num_stations
+        self.water_flow_rate = [12] * self.num_stations
+        self.last_reset = dt_util.now()
+        self.last_rain = dt_util.now()
+        self.last_sprinkle = dt_util.now()
         
         self.init_task = hass.async_create_task(self.async_init())
     
