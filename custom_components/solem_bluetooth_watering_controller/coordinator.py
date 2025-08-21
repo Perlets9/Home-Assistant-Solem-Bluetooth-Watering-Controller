@@ -131,6 +131,9 @@ class SolemCoordinator(DataUpdateCoordinator):
         self.storage = Store(hass, 1, f"irrigation_{config_entry.unique_id}")
         self.irrigation_stop_event = asyncio.Event()
         
+        # Initialize schedule to prevent AttributeError during early calls
+        self.schedule = None
+        
         self.init_task = hass.async_create_task(self.async_init())
     
         _LOGGER.info(f"{self.controller_mac_address} - Coordinator initialization finished!")
