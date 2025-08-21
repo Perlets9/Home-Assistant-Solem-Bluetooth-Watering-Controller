@@ -96,7 +96,7 @@ class SolemConfigFlow(ConfigFlow, domain=DOMAIN):
     @callback
     def async_get_options_flow(config_entry):
         """Get the options flow for this handler."""
-        return SolemOptionsFlowHandler(config_entry)
+        return SolemOptionsFlowHandler()
 
     async def async_step_user(
         self, user_input: dict[str, Any] | None = None
@@ -380,10 +380,9 @@ class SolemConfigFlow(ConfigFlow, domain=DOMAIN):
 class SolemOptionsFlowHandler(OptionsFlow):
     """Handles the options flow."""
 
-    def __init__(self, config_entry: ConfigEntry) -> None:
-        """Initialize options flow."""
-        self.config_entry = config_entry
-        self.options = dict(config_entry.options)
+    @property
+    def config_entry(self):
+        return self.hass.config_entries.async_get_entry(self.handler)
 
     async def async_step_init(self, user_input=None):
         """Handle options flow."""
@@ -398,17 +397,17 @@ class SolemOptionsFlowHandler(OptionsFlow):
             {
                 vol.Required(
                     CONF_SCAN_INTERVAL,
-                    default=self.options.get(CONF_SCAN_INTERVAL, DEFAULT_SCAN_INTERVAL),
+                    default=self.config_entry.options.get(CONF_SCAN_INTERVAL, DEFAULT_SCAN_INTERVAL),
                 ): (vol.All(vol.Coerce(int), vol.Clamp(min=MIN_SCAN_INTERVAL))),
                 vol.Required(
                     BLUETOOTH_TIMEOUT,
-                    default=self.options.get(BLUETOOTH_TIMEOUT, BLUETOOTH_DEFAULT_TIMEOUT),
+                    default=self.config_entry.options.get(BLUETOOTH_TIMEOUT, BLUETOOTH_DEFAULT_TIMEOUT),
                 ): (vol.All(vol.Coerce(int), vol.Clamp(min=BLUETOOTH_MIN_TIMEOUT))),
                 vol.Required(
                     OPEN_WEATHER_MAP_API_CACHE_TIMEOUT,
-                    default=self.options.get(OPEN_WEATHER_MAP_API_CACHE_TIMEOUT, OPEN_WEATHER_MAP_API_CACHE_DEFAULT_TIMEOUT),
+                    default=self.config_entry.options.get(OPEN_WEATHER_MAP_API_CACHE_TIMEOUT, OPEN_WEATHER_MAP_API_CACHE_DEFAULT_TIMEOUT),
                 ): (vol.All(vol.Coerce(int), vol.Clamp(min=OPEN_WEATHER_MAP_API_CACHE_MIN_TIMEOUT))),
-                vol.Required(SOLEM_API_MOCK, default=self.options.get(SOLEM_API_MOCK, "false")): selector(
+                vol.Required(SOLEM_API_MOCK, default=self.config_entry.options.get(SOLEM_API_MOCK, "false")): selector(
                     {
                         "select": {
                             "options": ["false", "true"],
