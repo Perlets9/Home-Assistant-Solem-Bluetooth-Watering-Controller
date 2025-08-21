@@ -378,6 +378,11 @@ class SolemCoordinator(DataUpdateCoordinator):
         today = dt_util.now().date()
         current_month_index = today.month - 1
     
+        # Check if schedule is initialized
+        if not self.schedule:
+            _LOGGER.debug(f"{self.controller_mac_address} - Schedule not initialized, returning zero target amounts.")
+            return target
+    
         month_config = self.schedule[current_month_index]
         if not month_config:
             _LOGGER.debug(f"{self.controller_mac_address} - Sprinkle target amounts: {target}")
