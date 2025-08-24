@@ -347,12 +347,13 @@ class SolemConfigFlow(ConfigFlow, domain=DOMAIN):
                 ]
                 self._input_data["station_areas"] = station_areas
     
-                return self.async_update_reload_and_abort(
+                # Use the new recommended method for updating config entries
+                self.hass.config_entries.async_update_entry(
                     config_entry,
-                    unique_id=config_entry.unique_id,
                     data=self._input_data,
-                    reason="reconfigure_successful",
                 )
+                
+                return self.async_abort(reason="reconfigure_successful")
             except Exception as e:
                 _LOGGER.exception("Failed to process reconfigured station areas")
                 errors["base"] = "unknown"

@@ -148,7 +148,9 @@ async def async_reconfigure_entry(hass: HomeAssistant, config_entry: ConfigEntry
     runtime_data: RuntimeData = hass.data[DOMAIN][config_entry.entry_id]
 
     # Atualizar a configuração do Coordinator
-    await runtime_data.coordinator.update_config(config_entry)
+    # Note: The config_entry is already updated by the config flow using async_update_entry
+    # We just need to trigger the coordinator to read the new values
+    await runtime_data.coordinator.update_config()
 
     # Forçar refresh do coordinator
     await runtime_data.coordinator.async_refresh()

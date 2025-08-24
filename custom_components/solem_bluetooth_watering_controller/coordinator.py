@@ -156,12 +156,30 @@ class SolemCoordinator(DataUpdateCoordinator):
         _LOGGER.info(f"{self.controller_mac_address} - Coordinator initialization finished!")
 
 
-    async def update_config(self, new_config: ConfigEntry):
-        """Update the coordinator with new configuration."""
+    async def update_config(self, new_data: dict[str, Any] = None, new_options: dict[str, Any] = None):
+        """Update the coordinator configuration using the new recommended method.
+        
+        This method updates the ConfigEntry via hass.config_entries.async_update_entry
+        and then updates internal variables.
+        """
         
         _LOGGER.info(f"{self.controller_mac_address} - Updating Coordinator with new config...")
-        self.config_entry = new_config  # Atualizar as configurações internas
-    
+        
+        # Prepare update parameters
+        update_params = {}
+        if new_data is not None:
+            update_params["data"] = new_data
+        if new_options is not None:
+            update_params["options"] = new_options
+            
+        # Update the ConfigEntry using the recommended method
+        if update_params:
+            self.hass.config_entries.async_update_entry(
+                self.config_entry,
+                **update_params
+            )
+        
+        # Now read the updated values from the ConfigEntry
         self.controller_mac_address = self.config_entry.data[CONTROLLER_MAC_ADDRESS].rsplit(' - ', 1)[1]
         self.sprinkle_with_rain = self.config_entry.data.get(SPRINKLE_WITH_RAIN, "False") == "true"
         self.openweathermap_api_key = self.config_entry.data.get(OPEN_WEATHER_MAP_API_KEY)
@@ -172,20 +190,20 @@ class SolemCoordinator(DataUpdateCoordinator):
             self.latitude = zone_state.attributes.get("latitude")
             self.longitude = zone_state.attributes.get("longitude")
 
-        self.soil_moisture_sensor = config_entry.data.get("soil_moisture_sensor")
-        self.soil_moisture_threshold = float(config_entry.data.get("soil_moisture_threshold", 0))
+        self.soil_moisture_sensor = self.config_entry.data.get("soil_moisture_sensor")
+        self.soil_moisture_threshold = float(self.config_entry.data.get("soil_moisture_threshold", 0))
 
         # set variables from options.  You need a default here in case options have not been set
         self.poll_interval = self.config_entry.options.get(
             CONF_SCAN_INTERVAL, DEFAULT_SCAN_INTERVAL
         )
-        self.bluetooth_timeout = config_entry.options.get(
+        self.bluetooth_timeout = self.config_entry.options.get(
             BLUETOOTH_TIMEOUT, BLUETOOTH_DEFAULT_TIMEOUT
         )
-        self.openweathermap_api_timeout = config_entry.options.get(
+        self.openweathermap_api_timeout = self.config_entry.options.get(
             OPEN_WEATHER_MAP_API_CACHE_TIMEOUT, OPEN_WEATHER_MAP_API_CACHE_DEFAULT_TIMEOUT
         )
-        self.solem_api_mock = config_entry.options.get(SOLEM_API_MOCK, "false") == "true"
+        self.solem_api_mock = self.config_entry.options.get(SOLEM_API_MOCK, "false") == "true"
 
         self.api = SolemAPI(mac_address=self.controller_mac_address, bluetooth_timeout=self.bluetooth_timeout)
         if self.openweathermap_api_key:
@@ -198,8 +216,8 @@ class SolemCoordinator(DataUpdateCoordinator):
         else:
             self.weather_api = None
 
-        self.num_stations = config_entry.data.get("num_stations", 2)
-        self.station_areas = config_entry.data.get("station_areas", [0] * self.num_stations)
+        self.num_stations = self.config_entry.data.get("num_stations", 2)
+        self.station_areas = self.config_entry.data.get("station_areas", [0] * self.num_stations)
         if not isinstance(self.station_areas, list) or len(self.station_areas) != self.num_stations:
             _LOGGER.warning(f"{self.controller_mac_address} - station_areas missing or invalid on update, setting defaults.")
             self.station_areas = [0] * self.num_stations
