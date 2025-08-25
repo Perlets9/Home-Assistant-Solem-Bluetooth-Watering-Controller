@@ -850,18 +850,7 @@ class SolemCoordinator(DataUpdateCoordinator):
             water_flow_counter += 1
         
 
-        # Buttons
-        for station_id in range(1, self.num_stations + 1):
-            data.append({
-                "device_id": f"{self.controller_mac_address}_irrigation_manual_start_station_{station_id}",
-                "device_type": "SPRINKLE_BUTTON",
-                "device_name": f"Sprinkle station {station_id}",
-                "device_uid": mac_to_uuid(self.controller_mac_address, buttons_counter),
-                "software_version": "1.0",
-                "icon": "mdi:sprinkler",
-                "last_reboot": None,
-            })
-            buttons_counter += 1
+        # Note: Removed individual station buttons - now using switches instead
         
         # Sprinkle total amount (mm) per station
         for station_id in range(1, self.num_stations + 1):

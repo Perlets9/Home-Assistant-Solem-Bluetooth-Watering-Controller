@@ -53,7 +53,7 @@ async def async_setup_entry(
     # ----------------------------------------------------------------------------
 
     button_types = [
-        ButtonTypeClass("SPRINKLE_BUTTON", IrrigationStartButton),
+        # Removed SPRINKLE_BUTTON - now using switches instead
         ButtonTypeClass("STOP_BUTTON", IrrigationStopButton),
         ButtonTypeClass("ON_BUTTON", ControllerOnButton),
         ButtonTypeClass("OFF_BUTTON", ControllerOffButton),

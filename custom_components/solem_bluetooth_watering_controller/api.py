@@ -164,10 +164,20 @@ class SolemAPI:
             _LOGGER.debug(f"Mock mode: would send command {command_hex}")
             return True
             
-        if not self.client or not self.client.is_connected:
-            await self.connect()
-        
         try:
+            # Ensure we have a connection
+            if not self.client or not self.client.is_connected:
+                _LOGGER.debug("No connection, attempting to connect...")
+                success = await self.connect()
+                if not success:
+                    _LOGGER.error("Failed to establish connection")
+                    return False
+            
+            # Verify connection is still good
+            if not self.client.is_connected:
+                _LOGGER.error("Client not connected after connection attempt")
+                return False
+            
             # Send the main command
             command_bytes = bytes.fromhex(command_hex)
             await self.client.write_gatt_char(WRITE_UUID, command_bytes, response=False)
@@ -182,6 +192,13 @@ class SolemAPI:
             
         except Exception as ex:
             _LOGGER.error(f"Failed to send command {command_hex}: {ex}")
+            # Try to disconnect and clean up on error
+            try:
+                if self.client:
+                    await self.client.disconnect()
+                self.client = None
+            except:
+                pass
             return False
 
     def _parse_status_notification(self, data: bytes) -> dict:
@@ -308,29 +325,37 @@ class SolemAPI:
             duration_minutes: Duration in minutes (minimum 1)
             
         Returns:
-            True if command sent successfully
+            True if command sent successfully, False otherwise
         """
-        if not (1 <= station <= 3):
-            raise ValueError("Station must be between 1 and 3")
+        try:
+            if not (1 <= station <= 3):
+                _LOGGER.error("Station must be between 1 and 3")
+                return False
+                
+            if duration_minutes < MIN_IRRIGATION_TIME:
+                _LOGGER.error(f"Minimum irrigation time is {MIN_IRRIGATION_TIME} minute(s)")
+                return False
+                
+            if duration_minutes > MAX_IRRIGATION_TIME:
+                _LOGGER.error(f"Maximum irrigation time is {MAX_IRRIGATION_TIME} minutes")
+                return False
             
-        if duration_minutes < MIN_IRRIGATION_TIME:
-            raise ValueError(f"Minimum irrigation time is {MIN_IRRIGATION_TIME} minute(s)")
+            # Convert to seconds
+            duration_seconds = duration_minutes * 60
             
-        if duration_minutes > MAX_IRRIGATION_TIME:
-            raise ValueError(f"Maximum irrigation time is {MAX_IRRIGATION_TIME} minutes")
-        
-        # Convert to seconds
-        duration_seconds = duration_minutes * 60
-        
-        # Format: 3105 12 [STATION] 00 [SECONDS_HEX] (big-endian)
-        # Using struct.pack(">HBBBH", 0x3105, 0x12, station, 0x00, seconds)
-        command = struct.pack(">HBBBH", 0x3105, 0x12, station, 0x00, duration_seconds)
-        command_hex = command.hex()
-        
-        _LOGGER.info(f"Starting irrigation: Station {station} for {duration_minutes} minutes ({duration_seconds}s)")
-        _LOGGER.debug(f"Command: {command_hex}")
-        
-        return await self._send_command(command_hex)
+            # Format: 3105 12 [STATION] 00 [SECONDS_HEX] (big-endian)
+            # Using struct.pack(">HBBBH", 0x3105, 0x12, station, 0x00, seconds)
+            command = struct.pack(">HBBBH", 0x3105, 0x12, station, 0x00, duration_seconds)
+            command_hex = command.hex()
+            
+            _LOGGER.info(f"Starting irrigation: Station {station} for {duration_minutes} minutes ({duration_seconds}s)")
+            _LOGGER.debug(f"Command: {command_hex}")
+            
+            return await self._send_command(command_hex)
+            
+        except Exception as ex:
+            _LOGGER.error(f"Error in start_irrigation_station: {ex}")
+            return False
 
     async def start_irrigation_all_stations(self, duration_minutes: int) -> bool:
         """Start irrigation for all stations.
@@ -339,35 +364,46 @@ class SolemAPI:
             duration_minutes: Duration in minutes (minimum 1)
             
         Returns:
-            True if command sent successfully
+            True if command sent successfully, False otherwise
         """
-        if duration_minutes < MIN_IRRIGATION_TIME:
-            raise ValueError(f"Minimum irrigation time is {MIN_IRRIGATION_TIME} minute(s)")
+        try:
+            if duration_minutes < MIN_IRRIGATION_TIME:
+                _LOGGER.error(f"Minimum irrigation time is {MIN_IRRIGATION_TIME} minute(s)")
+                return False
+                
+            if duration_minutes > MAX_IRRIGATION_TIME:
+                _LOGGER.error(f"Maximum irrigation time is {MAX_IRRIGATION_TIME} minutes")
+                return False
             
-        if duration_minutes > MAX_IRRIGATION_TIME:
-            raise ValueError(f"Maximum irrigation time is {MAX_IRRIGATION_TIME} minutes")
-        
-        # Convert to seconds
-        duration_seconds = duration_minutes * 60
-        
-        # Format: 3105 11 0000 [SECONDS_HEX] (big-endian)
-        # Using struct.pack(">HBHH", 0x3105, 0x11, 0x0000, seconds)
-        command = struct.pack(">HBHH", 0x3105, 0x11, 0x0000, duration_seconds)
-        command_hex = command.hex()
-        
-        _LOGGER.info(f"Starting irrigation: All stations for {duration_minutes} minutes ({duration_seconds}s)")
-        _LOGGER.debug(f"Command: {command_hex}")
-        
-        return await self._send_command(command_hex)
+            # Convert to seconds
+            duration_seconds = duration_minutes * 60
+            
+            # Format: 3105 11 0000 [SECONDS_HEX] (big-endian)
+            # Using struct.pack(">HBHH", 0x3105, 0x11, 0x0000, seconds)
+            command = struct.pack(">HBHH", 0x3105, 0x11, 0x0000, duration_seconds)
+            command_hex = command.hex()
+            
+            _LOGGER.info(f"Starting irrigation: All stations for {duration_minutes} minutes ({duration_seconds}s)")
+            _LOGGER.debug(f"Command: {command_hex}")
+            
+            return await self._send_command(command_hex)
+            
+        except Exception as ex:
+            _LOGGER.error(f"Error in start_irrigation_all_stations: {ex}")
+            return False
 
     async def stop_irrigation(self) -> bool:
         """Stop all irrigation immediately.
         
         Returns:
-            True if command sent successfully
+            True if command sent successfully, False otherwise
         """
-        _LOGGER.info("Stopping irrigation")
-        return await self._send_command(STOP_COMMAND)
+        try:
+            _LOGGER.info("Stopping irrigation")
+            return await self._send_command(STOP_COMMAND)
+        except Exception as ex:
+            _LOGGER.error(f"Error in stop_irrigation: {ex}")
+            return False
 
     # Legacy method names for compatibility
     async def sprinkle_station_x_for_y_minutes(self, station: int, minutes: int):

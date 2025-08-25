@@ -88,22 +88,25 @@ class StationSwitch(SolemSwitchEntity):
     @property
     def is_on(self) -> bool:
         """Return true if the station is currently irrigating."""
-        if hasattr(self.coordinator, 'device_status') and self.coordinator.device_status:
-            mode = self.coordinator.device_status.get("mode", "idle")
-            active = self.coordinator.device_status.get("active", False)
-            
-            # Check if this specific station is active
-            if mode == "single_station_active" and active:
-                # This is a limitation - we can't know which specific station is active
-                # from the device status alone. For now, assume first station.
-                return self.station_number == 1
-            elif mode == "all_stations_active" and active:
-                return True
-                
-        # Fallback to coordinator station state
+        # Primary source: coordinator station state (most reliable)
         if self.station_number <= len(self.coordinator.stations):
             station_state = self.coordinator.stations[self.station_number - 1].state
-            return station_state == "Sprinkling"
+            is_sprinkling = station_state == "Sprinkling"
+            
+            # Cross-check with device status if available
+            if hasattr(self.coordinator, 'device_status') and self.coordinator.device_status:
+                mode = self.coordinator.device_status.get("mode", "idle")
+                active = self.coordinator.device_status.get("active", False)
+                
+                # Validate consistency
+                if is_sprinkling and mode == "idle":
+                    _LOGGER.debug(f"Station {self.station_number} state inconsistency: local=Sprinkling, device=idle")
+                elif is_sprinkling and mode == "all_stations_active":
+                    _LOGGER.debug(f"Station {self.station_number} active as part of all stations")
+                elif is_sprinkling and mode == "single_station_active":
+                    _LOGGER.debug(f"Station {self.station_number} active as single station")
+                    
+            return is_sprinkling
             
         return False
 
@@ -113,9 +116,27 @@ class StationSwitch(SolemSwitchEntity):
         _LOGGER.info(f"Turning on station {self.station_number} for {duration} minutes")
         
         try:
-            await self.coordinator.start_irrigation(self.station_number, duration)
+            # Use the API directly for better control
+            success = await self.coordinator.api.start_irrigation_station(self.station_number, duration)
+            
+            if success:
+                # Update coordinator states immediately
+                self.coordinator.stations[self.station_number - 1].state = "Sprinkling" 
+                # Set other stations to idle
+                for i, station in enumerate(self.coordinator.stations):
+                    if i != (self.station_number - 1):
+                        station.state = "Idle"
+                self.coordinator.controller.state = f"Active - Station {self.station_number}"
+                
+                # Force immediate coordinator update to refresh all entities
+                asyncio.create_task(self._immediate_refresh())
+            else:
+                raise Exception("Command failed")
+                
         except Exception as ex:
             _LOGGER.error(f"Failed to start irrigation for station {self.station_number}: {ex}")
+            # Force state update even on error
+            asyncio.create_task(self._immediate_refresh())
             raise
 
     async def async_turn_off(self, **kwargs: Any) -> None:
@@ -123,10 +144,34 @@ class StationSwitch(SolemSwitchEntity):
         _LOGGER.info(f"Turning off station {self.station_number}")
         
         try:
-            await self.coordinator.stop_irrigation()
+            success = await self.coordinator.api.stop_irrigation()
+            
+            if success:
+                # Update all stations to stopped
+                for station in self.coordinator.stations:
+                    station.state = "Idle"
+                self.coordinator.controller.state = "Idle"
+                
+                # Force immediate coordinator update to refresh all entities
+                asyncio.create_task(self._immediate_refresh())
+            else:
+                raise Exception("Stop command failed")
+                
         except Exception as ex:
             _LOGGER.error(f"Failed to stop irrigation: {ex}")
+            # Force state update even on error
+            asyncio.create_task(self._immediate_refresh())
             raise
+            
+    async def _immediate_refresh(self):
+        """Immediate refresh to update all sensors and switches."""
+        try:
+            data = await self.coordinator.async_update_all_sensors()
+            if data is not None:
+                self.coordinator.async_set_updated_data(data)
+                _LOGGER.debug("Coordinator data updated after switch action")
+        except Exception as ex:
+            _LOGGER.error(f"Error during immediate refresh: {ex}")
             
     @property
     def extra_state_attributes(self):
@@ -172,20 +217,23 @@ class AllStationsSwitch(SolemSwitchEntity):
         _LOGGER.info(f"Turning on all stations for {duration} minutes")
         
         try:
-            await self.coordinator.api.start_irrigation_all_stations(duration)
+            success = await self.coordinator.api.start_irrigation_all_stations(duration)
             
-            # Update coordinator states
-            self.coordinator.controller.state = "Active - All Stations"
-            for station in self.coordinator.stations:
-                station.state = "Sprinkling"
+            if success:
+                # Update coordinator states immediately
+                self.coordinator.controller.state = "Active - All Stations"
+                for station in self.coordinator.stations:
+                    station.state = "Sprinkling"
                 
-            # Trigger coordinator update
-            data = await self.coordinator.async_update_all_sensors()
-            if data is not None:
-                self.coordinator.async_set_updated_data(data)
+                # Force immediate coordinator update to refresh all entities
+                asyncio.create_task(self._immediate_refresh())
+            else:
+                raise Exception("All stations command failed")
                 
         except Exception as ex:
             _LOGGER.error(f"Failed to start irrigation for all stations: {ex}")
+            # Force state update even on error
+            asyncio.create_task(self._immediate_refresh())
             raise
 
     async def async_turn_off(self, **kwargs: Any) -> None:
@@ -193,10 +241,34 @@ class AllStationsSwitch(SolemSwitchEntity):
         _LOGGER.info("Turning off all stations")
         
         try:
-            await self.coordinator.stop_irrigation()
+            success = await self.coordinator.api.stop_irrigation()
+            
+            if success:
+                # Update all stations to stopped
+                for station in self.coordinator.stations:
+                    station.state = "Idle"
+                self.coordinator.controller.state = "Idle"
+                
+                # Force immediate coordinator update to refresh all entities
+                asyncio.create_task(self._immediate_refresh())
+            else:
+                raise Exception("Stop command failed")
+                
         except Exception as ex:
             _LOGGER.error(f"Failed to stop irrigation: {ex}")
+            # Force state update even on error
+            asyncio.create_task(self._immediate_refresh())
             raise
+            
+    async def _immediate_refresh(self):
+        """Immediate refresh to update all sensors and switches."""
+        try:
+            data = await self.coordinator.async_update_all_sensors()
+            if data is not None:
+                self.coordinator.async_set_updated_data(data)
+                _LOGGER.debug("Coordinator data updated after switch action")
+        except Exception as ex:
+            _LOGGER.error(f"Error during immediate refresh: {ex}")
             
     @property
     def extra_state_attributes(self):
