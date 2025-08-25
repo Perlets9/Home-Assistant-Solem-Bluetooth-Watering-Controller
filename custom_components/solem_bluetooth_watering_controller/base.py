@@ -58,12 +58,30 @@ class SolemBaseEntity(CoordinatorEntity):
         """Update sensor with latest data from coordinator."""
         # This method is called by your DataUpdateCoordinator when a successful update runs.
         self.device = self.coordinator.get_device(self.device_id)
+        
+        if self.device is None:
+            _LOGGER.warning(
+                "Device data not available for device_id: %s. Coordinator data may be incomplete.",
+                self.device_id,
+            )
+            # Still try to update state, but entities will use fallback values
+        
+        device_name = self.coordinator.get_device_parameter(self.device_id, "device_name") or "Unknown Device"
         _LOGGER.debug(
             "Updating device: %s, %s",
             self.device_id,
-            self.coordinator.get_device_parameter(self.device_id, "device_name"),
+            device_name,
         )
-        self.async_write_ha_state()
+        
+        try:
+            self.async_write_ha_state()
+        except Exception as ex:
+            _LOGGER.error(
+                "Failed to update state for device %s: %s",
+                self.device_id,
+                ex,
+                exc_info=True
+            )
 
     @property
     def device_info(self) -> DeviceInfo:
@@ -101,7 +119,11 @@ class SolemBaseEntity(CoordinatorEntity):
     def name(self) -> str:
         """Return the name of the sensor."""
         #return self.parameter.replace("_", " ").title()
-        return self.device["device_name"]
+        if self.device:
+            return self.device["device_name"]
+        else:
+            # Fallback to parameter name if device data is not available
+            return self.parameter.replace("_", " ").title()
 
     @property
     def unique_id(self) -> str:
@@ -128,7 +150,8 @@ class SolemBaseEntity(CoordinatorEntity):
         #
         # This is even more important if your integration supports multiple instances.
         # ----------------------------------------------------------------------------
-        return f"{DOMAIN}-{self.coordinator.controller_mac_address}-{self.coordinator.get_device_parameter(self.device_id, "device_uid")}-{self.parameter}"
+        device_uid = self.coordinator.get_device_parameter(self.device_id, "device_uid") or "unknown"
+        return f"{DOMAIN}-{self.coordinator.controller_mac_address}-{device_uid}-{self.parameter}"
 
     @property
     def extra_state_attributes(self):
