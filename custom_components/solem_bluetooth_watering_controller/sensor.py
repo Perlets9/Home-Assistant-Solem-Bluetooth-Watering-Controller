@@ -61,6 +61,10 @@ async def async_setup_entry(
         SensorTypeClass("TOTAL_FORECASTED_RAIN_TODAY", "state", TotalForecastedRainSensor),
         SensorTypeClass("SPRINKLE_TOTAL_AMOUNT_SENSOR", "state", SprinkleTotalAmountSensor),
         SensorTypeClass("FORECASTED_SPRINKLE_TODAY_SENSOR", "state", ForecastedSprinkleTodaySensor),
+        # New device status sensors
+        SensorTypeClass("DEVICE_STATUS_SENSOR", "state", DeviceStatusSensor),
+        SensorTypeClass("TIMER_REMAINING_SENSOR", "state", TimerRemainingSensor),
+        SensorTypeClass("DEVICE_ACTIVE_SENSOR", "state", DeviceActiveSensor),
     ]
 
     sensors = []
@@ -226,3 +230,55 @@ class ForecastedSprinkleTodaySensor(SolemBaseEntity, SensorEntity):
     def native_value(self) -> float:
         """Retorna o valor previsto de rega para hoje para esta estação (mm)."""
         return self.coordinator.get_device_parameter(self.device_id, self.parameter)
+
+
+class DeviceStatusSensor(SolemBaseEntity, SensorEntity):
+    """Sensor that shows the current device irrigation status from SOLEM BLIP."""
+
+    @property
+    def native_value(self) -> str:
+        return self.coordinator.get_device_parameter(self.device_id, self.parameter)
+    
+    @property
+    def extra_state_attributes(self):
+        """Return additional state attributes."""
+        return {
+            "sub_status_code": self.coordinator.device_status.get("sub_status_code"),
+            "raw_response": self.coordinator.device_status.get("raw_response"),
+            "timer_remaining": self.coordinator.device_status.get("timer_remaining", 0),
+        }
+
+
+class TimerRemainingSensor(SolemBaseEntity, SensorEntity):
+    """Sensor that shows remaining irrigation time in minutes."""
+    
+    _attr_device_class = SensorDeviceClass.DURATION
+    _attr_state_class = SensorStateClass.MEASUREMENT
+    _attr_native_unit_of_measurement = "min"
+    
+    @property
+    def native_value(self) -> int:
+        return self.coordinator.get_device_parameter(self.device_id, self.parameter)
+    
+    @property
+    def extra_state_attributes(self):
+        """Return additional state attributes."""
+        return {
+            "timer_seconds": self.coordinator.device_status.get("timer_seconds", 0),
+            "total_seconds": self.coordinator.device_status.get("timer_remaining", 0),
+        }
+
+
+class DeviceActiveSensor(SolemBaseEntity, SensorEntity):
+    """Binary sensor that shows if device is actively irrigating."""
+    
+    @property
+    def native_value(self) -> bool:
+        return self.coordinator.get_device_parameter(self.device_id, self.parameter)
+        
+    @property
+    def icon(self) -> str:
+        """Return the icon based on the device state."""
+        if self.native_value:
+            return "mdi:sprinkler"
+        return "mdi:sprinkler-off"

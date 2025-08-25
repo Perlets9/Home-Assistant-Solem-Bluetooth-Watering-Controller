@@ -68,7 +68,7 @@ async def validate_input(hass: HomeAssistant, data: dict[str, Any]) -> dict[str,
         # ----------------------------------------------------------------------------
         mac_address = data[CONTROLLER_MAC_ADDRESS].rsplit(' - ', 1)
         _LOGGER.debug(mac_address)
-        api = SolemAPI(mac_address[1], BLUETOOTH_DEFAULT_TIMEOUT)
+        api = SolemAPI(device_address=mac_address[1], bluetooth_timeout=BLUETOOTH_DEFAULT_TIMEOUT)
         await api.connect()
         _LOGGER.debug(f"Connected to Bluetooth controller {mac_address[1]}")
     except APIConnectionError as err:
@@ -110,23 +110,27 @@ class SolemConfigFlow(ConfigFlow, domain=DOMAIN):
         
 
         if user_input is not None:
-            # The form has been filled in and submitted, so process the data provided.
-            try:
-                # ----------------------------------------------------------------------------
-                # Validate that the setup data is valid and if not handle errors.
-                # You can do any validation you want or no validation on each step.
-                # The errors["base"] values match the values in your strings.json and translation files.
-                # ----------------------------------------------------------------------------
-                info = await validate_input(self.hass, user_input)
-            except CannotConnect:
-                errors["base"] = "cannot_connect"
-                _LOGGER.exception("Cannot connect")
-            except InvalidAuth:
-                errors["base"] = "invalid_auth"
-                _LOGGER.exception("Invalid Auth")
-            except Exception:  # pylint: disable=broad-except
-                _LOGGER.exception("Unexpected exception")
-                errors["base"] = "unknown"
+            # Check if user selected "none" (no devices found)
+            if user_input.get(CONTROLLER_MAC_ADDRESS) == "none":
+                errors["base"] = "no_devices_found"
+            else:
+                # The form has been filled in and submitted, so process the data provided.
+                try:
+                    # ----------------------------------------------------------------------------
+                    # Validate that the setup data is valid and if not handle errors.
+                    # You can do any validation you want or no validation on each step.
+                    # The errors["base"] values match the values in your strings.json and translation files.
+                    # ----------------------------------------------------------------------------
+                    info = await validate_input(self.hass, user_input)
+                except CannotConnect:
+                    errors["base"] = "cannot_connect"
+                    _LOGGER.exception("Cannot connect")
+                except InvalidAuth:
+                    errors["base"] = "invalid_auth"
+                    _LOGGER.exception("Invalid Auth")
+                except Exception:  # pylint: disable=broad-except
+                    _LOGGER.exception("Unexpected exception")
+                    errors["base"] = "unknown"
 
             if "base" not in errors:
                 # Validation was successful, so proceed to the next step.
@@ -156,13 +160,18 @@ class SolemConfigFlow(ConfigFlow, domain=DOMAIN):
 
         existing_entries = {entry.data.get(CONTROLLER_MAC_ADDRESS) for entry in self.hass.config_entries.async_entries(DOMAIN)}
 
-        api = SolemAPI(None, BLUETOOTH_DEFAULT_TIMEOUT)
-        bt_devices = await api.scan_bluetooth()
+        # Discover SOLEM BLIP devices using the new API
+        bt_devices = await SolemAPI.discover_devices()
         options = [
             {"value": f"{device.name or 'Unknown'} - {device.address}", "label": f"{device.name or 'Unknown'} - {device.address}"}
             for device in bt_devices
             if f"{device.name or 'Unknown'} - {device.address}" not in existing_entries
         ]
+        
+        # If no SOLEM devices found, show a helpful message
+        if not options:
+            _LOGGER.warning("No SOLEM BLIP devices discovered")
+            options = [{"value": "none", "label": "No SOLEM BLIP devices found - ensure device is powered on and nearby"}]
         schema = vol.Schema(
             {
                 vol.Required(CONTROLLER_MAC_ADDRESS): selector(
@@ -253,14 +262,18 @@ class SolemConfigFlow(ConfigFlow, domain=DOMAIN):
         self.num_stations = config_entry.data.get(NUM_STATIONS, 1)
 
         if user_input is not None:
-            try:
-                await validate_input(self.hass, user_input)
-            except CannotConnect:
-                errors["base"] = "cannot_connect"
-                _LOGGER.exception("Cannot connect")
-            except Exception:  # pylint: disable=broad-except
-                _LOGGER.exception("Unexpected exception")
-                errors["base"] = "unknown"
+            # Check if user selected "none" (no devices found)
+            if user_input.get(CONTROLLER_MAC_ADDRESS) == "none":
+                errors["base"] = "no_devices_found"
+            else:
+                try:
+                    await validate_input(self.hass, user_input)
+                except CannotConnect:
+                    errors["base"] = "cannot_connect"
+                    _LOGGER.exception("Cannot connect")
+                except Exception:  # pylint: disable=broad-except
+                    _LOGGER.exception("Unexpected exception")
+                    errors["base"] = "unknown"
 
             if "base" not in errors:
                 # Validation was successful, so proceed to the next step.
@@ -287,12 +300,17 @@ class SolemConfigFlow(ConfigFlow, domain=DOMAIN):
                 
                 return await self.async_step_station_areas_reconfigure()
 
-        api = SolemAPI(None, BLUETOOTH_DEFAULT_TIMEOUT)
-        bt_devices = await api.scan_bluetooth()
+        # Discover SOLEM BLIP devices using the new API
+        bt_devices = await SolemAPI.discover_devices()
         options = [
             {"value": f"{device.name or 'Unknown'} - {device.address}", "label": f"{device.name or 'Unknown'} - {device.address}"}
             for device in bt_devices
         ]
+        
+        # If no SOLEM devices found, show a helpful message
+        if not options:
+            _LOGGER.warning("No SOLEM BLIP devices discovered during reconfigure")
+            options = [{"value": "none", "label": "No SOLEM BLIP devices found - ensure device is powered on and nearby"}]
 
         return self.async_show_form(
             step_id="reconfigure",

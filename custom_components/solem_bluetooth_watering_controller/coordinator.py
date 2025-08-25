@@ -118,7 +118,7 @@ class SolemCoordinator(DataUpdateCoordinator):
             for station_id in range(1, self.num_stations + 1)
         ]
         
-        self.api = SolemAPI(mac_address=self.controller_mac_address, bluetooth_timeout=self.bluetooth_timeout)
+        self.api = SolemAPI(device_address=self.controller_mac_address, bluetooth_timeout=self.bluetooth_timeout)
         if self.openweathermap_api_key:
             self.weather_api = OpenWeatherMapAPI(
                 self.openweathermap_api_key,
@@ -205,7 +205,7 @@ class SolemCoordinator(DataUpdateCoordinator):
         )
         self.solem_api_mock = self.config_entry.options.get(SOLEM_API_MOCK, "false") == "true"
 
-        self.api = SolemAPI(mac_address=self.controller_mac_address, bluetooth_timeout=self.bluetooth_timeout)
+        self.api = SolemAPI(device_address=self.controller_mac_address, bluetooth_timeout=self.bluetooth_timeout)
         if self.openweathermap_api_key:
             self.weather_api = OpenWeatherMapAPI(
                 self.openweathermap_api_key,
@@ -680,6 +680,54 @@ class SolemCoordinator(DataUpdateCoordinator):
 
 
     
+    async def async_update_device_status(self):
+        """Update device status from SOLEM BLIP controller."""
+        try:
+            device_status = await self.api.get_status()
+            _LOGGER.debug(f"{self.controller_mac_address} - Device status: {device_status}")
+            
+            # Update controller state
+            if device_status.get("mode") == "idle":
+                self.controller.state = "Idle"
+                # Reset all station states when device is idle
+                for station in self.stations:
+                    station.state = "Idle"
+            elif device_status.get("mode") == "single_station_active":
+                self.controller.state = "Active - Single Station"
+                # Set one station as active (we don't know which one from the status alone)
+                # This is a limitation - we'd need additional logic to determine active station
+                for i, station in enumerate(self.stations):
+                    if i == 0:  # Assume first station is active for now
+                        station.state = "Sprinkling"
+                    else:
+                        station.state = "Idle"
+            elif device_status.get("mode") == "all_stations_active":
+                self.controller.state = "Active - All Stations"
+                # Set all stations as active
+                for station in self.stations:
+                    station.state = "Sprinkling"
+            elif device_status.get("mode") == "programmed_off":
+                self.controller.state = "Programmed Off"
+                for station in self.stations:
+                    station.state = "Off"
+            else:
+                self.controller.state = f"Unknown ({device_status.get('mode', 'no_response')})"
+                
+            # Store device status for sensors
+            self.device_status = device_status
+            
+        except Exception as ex:
+            _LOGGER.warning(f"{self.controller_mac_address} - Failed to get device status: {ex}")
+            self.device_status = {
+                "active": False,
+                "mode": "unknown",
+                "timer_remaining": 0,
+                "timer_minutes": 0,
+                "timer_seconds": 0,
+                "sub_status_code": None,
+                "raw_response": None
+            }
+
     async def async_update_all_sensors(self):
         _LOGGER.debug(f"{self.controller_mac_address} - Updating all sensors...")
 
@@ -691,6 +739,11 @@ class SolemCoordinator(DataUpdateCoordinator):
             self.rain_total_amount_forecasted_today = 0
         if not hasattr(self, 'last_reset'):
             self.last_reset = None
+        if not hasattr(self, 'device_status'):
+            self.device_status = {}
+        
+        # Update device status from SOLEM controller
+        await self.async_update_device_status()
         
         # Verifies if it's after 00:05:00
         now = dt_util.now()
@@ -978,6 +1031,43 @@ class SolemCoordinator(DataUpdateCoordinator):
             "last_reboot": None,
         })
         counter += 1
+        
+        # Device Status Sensors
+        data.append({
+            "device_id": f"{self.controller_mac_address}_device_irrigation_status",
+            "device_type": "DEVICE_STATUS_SENSOR",
+            "device_name": f"Device Irrigation Status",
+            "device_uid": mac_to_uuid(self.controller_mac_address, counter),
+            "software_version": "1.0",
+            "state": self.device_status.get("mode", "unknown"),
+            "icon": "mdi:state-machine",
+            "last_reboot": None,
+        })
+        counter += 1
+        
+        data.append({
+            "device_id": f"{self.controller_mac_address}_device_timer_remaining",
+            "device_type": "TIMER_REMAINING_SENSOR", 
+            "device_name": f"Timer Remaining",
+            "device_uid": mac_to_uuid(self.controller_mac_address, counter),
+            "software_version": "1.0",
+            "state": self.device_status.get("timer_minutes", 0),
+            "icon": "mdi:timer-sand",
+            "last_reboot": None,
+        })
+        counter += 1
+        
+        data.append({
+            "device_id": f"{self.controller_mac_address}_device_active",
+            "device_type": "DEVICE_ACTIVE_SENSOR",
+            "device_name": f"Device Active",
+            "device_uid": mac_to_uuid(self.controller_mac_address, counter),
+            "software_version": "1.0", 
+            "state": self.device_status.get("active", False),
+            "icon": "mdi:sprinkler" if self.device_status.get("active", False) else "mdi:sprinkler-off",
+            "last_reboot": None,
+        })
+        counter += 1
 
         # Save persistent data
         await self.save_persistent_data()
@@ -1026,7 +1116,7 @@ class SolemCoordinator(DataUpdateCoordinator):
         _LOGGER.info(f"{self.controller_mac_address} - Going to start watering on station {station} for {duration} minutes...")
         
         try:
-            await self.api.sprinkle_station_x_for_y_minutes(station, duration)
+            await self.api.start_irrigation_station(station, duration)
         except APIConnectionError as ex:
             _LOGGER.error(f"{self.controller_mac_address} - Failed due to connection error.")
             return
@@ -1068,7 +1158,7 @@ class SolemCoordinator(DataUpdateCoordinator):
     async def stop_irrigation(self):
         _LOGGER.info(f"{self.controller_mac_address} - Stopping watering...")
         try:
-            await self.api.stop_manual_sprinkle()
+            await self.api.stop_irrigation()
         except APIConnectionError as ex:
             _LOGGER.error(f"{self.controller_mac_address} - Failed due to connection error.")
             return
@@ -1087,6 +1177,7 @@ class SolemCoordinator(DataUpdateCoordinator):
         _LOGGER.info(f"{self.controller_mac_address} - Turning irrigation controller on...")
 
         try:
+            # Note: turn_on() is deprecated in new API - it's used for status checking
             await self.api.turn_on()
         except APIConnectionError as ex:
             _LOGGER.error(f"{self.controller_mac_address} - Failed due to connection error.")
